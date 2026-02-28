@@ -12,6 +12,7 @@ const { toLong, toNum, getServerTimeSec, toTimeSec, log, logWarn, sleep } = requ
 const { getPlantRankings } = require('./analytics');
 const { createScheduler } = require('./scheduler');
 const { recordOperation } = require('./stats');
+const { getFarmOptimizer } = require('./rate-limiter');
 
 // ============ 内部状态 ============
 let isCheckingFarm = false;
@@ -929,20 +930,54 @@ async function runFarmOperation(opType) {
     statusParts.push(`长:${status.growing.length}`);
 
     const actions = [];
-    const batchOps = [];
+    const optimizer = getFarmOptimizer();
 
-    // 执行除草/虫/水
+    // 执行除草/虫/水 (使用并发控制)
     if (opType === 'all' || opType === 'clear') {
+        const farmOperations = [];
+        
         if (status.needWeed.length > 0) {
-            batchOps.push(weedOut(status.needWeed).then(() => { actions.push(`除草${status.needWeed.length}`); recordOperation('weed', status.needWeed.length); }).catch(e => logWarn('除草', e.message)));
+            farmOperations.push({
+                type: 'weed',
+                landIds: status.needWeed,
+                fn: async () => {
+                    await weedOut(status.needWeed);
+                    actions.push(`除草${status.needWeed.length}`);
+                    recordOperation('weed', status.needWeed.length);
+                }
+            });
         }
         if (status.needBug.length > 0) {
-            batchOps.push(insecticide(status.needBug).then(() => { actions.push(`除虫${status.needBug.length}`); recordOperation('bug', status.needBug.length); }).catch(e => logWarn('除虫', e.message)));
+            farmOperations.push({
+                type: 'bug',
+                landIds: status.needBug,
+                fn: async () => {
+                    await insecticide(status.needBug);
+                    actions.push(`除虫${status.needBug.length}`);
+                    recordOperation('bug', status.needBug.length);
+                }
+            });
         }
         if (status.needWater.length > 0) {
-            batchOps.push(waterLand(status.needWater).then(() => { actions.push(`浇水${status.needWater.length}`); recordOperation('water', status.needWater.length); }).catch(e => logWarn('浇水', e.message)));
+            farmOperations.push({
+                type: 'water',
+                landIds: status.needWater,
+                fn: async () => {
+                    await waterLand(status.needWater);
+                    actions.push(`浇水${status.needWater.length}`);
+                    recordOperation('water', status.needWater.length);
+                }
+            });
         }
-        if (batchOps.length > 0) await Promise.all(batchOps);
+        
+        // 使用批量操作优化器执行
+        if (farmOperations.length > 0) {
+            try {
+                await optimizer.batchFarmOperations(farmOperations);
+            } catch (e) {
+                logWarn('农场', `批量操作失败: ${e.message}`);
+            }
+        }
     }
 
     // 执行收获

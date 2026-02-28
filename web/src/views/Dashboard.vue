@@ -189,6 +189,10 @@ const nextFriendCheck = ref('--:--:--')
 const localUptime = ref(0)
 let localNextFarmRemainSec = 0
 let localNextFriendRemainSec = 0
+let localFarmInspecting = false
+let localFriendInspecting = false
+let localFarmWaiting = false
+let localFriendWaiting = false
 
 function updateCountdowns() {
   // Update uptime
@@ -198,20 +202,28 @@ function updateCountdowns() {
   }
   else {
     localUptime.value++
-    if (localNextFarmRemainSec > 0) {
+    
+    // 优先显示巡查状态
+    if (localFarmInspecting) {
+      nextFarmCheck.value = '巡查中...'
+    } else if (localFarmWaiting) {
+      nextFarmCheck.value = '等待巡查...'
+    } else if (localNextFarmRemainSec > 0) {
       localNextFarmRemainSec--
       nextFarmCheck.value = formatDuration(localNextFarmRemainSec)
-    }
-    else {
-      nextFarmCheck.value = '巡查中...'
+    } else {
+      nextFarmCheck.value = '等待巡查...'
     }
 
-    if (localNextFriendRemainSec > 0) {
+    if (localFriendInspecting) {
+      nextFriendCheck.value = '巡查中...'
+    } else if (localFriendWaiting) {
+      nextFriendCheck.value = '等待巡查...'
+    } else if (localNextFriendRemainSec > 0) {
       localNextFriendRemainSec--
       nextFriendCheck.value = formatDuration(localNextFriendRemainSec)
-    }
-    else {
-      nextFriendCheck.value = '巡查中...'
+    } else {
+      nextFriendCheck.value = '等待巡查...'
     }
   }
 }
@@ -223,6 +235,10 @@ watch(status, (newVal) => {
     // Here we just take server value when it comes.
     localNextFarmRemainSec = newVal.nextChecks.farmRemainSec || 0
     localNextFriendRemainSec = newVal.nextChecks.friendRemainSec || 0
+    localFarmInspecting = newVal.nextChecks.farmInspecting || false
+    localFriendInspecting = newVal.nextChecks.friendInspecting || false
+    localFarmWaiting = newVal.nextChecks.farmWaiting || false
+    localFriendWaiting = newVal.nextChecks.friendWaiting || false
     updateCountdowns() // Update immediately
   }
   if (newVal?.uptime !== undefined) {

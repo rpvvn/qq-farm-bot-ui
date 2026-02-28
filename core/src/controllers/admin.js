@@ -19,8 +19,15 @@ const { findAccountByRef, normalizeAccountRef, resolveAccountId } = require('../
 const { createModuleLogger } = require('../services/logger');
 const { MiniProgramLoginSession } = require('../services/qrlogin');
 const { getSchedulerRegistrySnapshot } = require('../services/scheduler');
+const { 
+    hashPassword: secureHash, 
+    verifyPassword,
+    rateLimitMiddleware,
+    recordLoginAttempts,
+    clearLoginAttempts
+} = require('../services/security');
 
-const hashPassword = (pwd) => crypto.createHash('sha256').update(String(pwd || '')).digest('hex');
+const hashPassword = (pwd) => secureHash(pwd); // 兼容旧接口
 const adminLogger = createModuleLogger('admin');
 
 let app = null;
@@ -79,6 +86,13 @@ function startAdminServer(dataProvider) {
         next();
     });
 
+    // 速率限制中间件
+    app.use('/api', rateLimitMiddleware({
+        windowMs: 60000,  // 1分钟
+        maxRequests: 100, // 最多100次
+        keyGenerator: (req) => req.ip,
+    }));
+
     const webDist = path.join(__dirname, '../../../web/dist');
     if (fs.existsSync(webDist)) {
         app.use(express.static(webDist));
@@ -89,19 +103,34 @@ function startAdminServer(dataProvider) {
     app.use('/game-config', express.static(getResourcePath('gameConfig')));
 
     // 登录与鉴权
-    app.post('/api/login', (req, res) => {
+    app.post('/api/login', async (req, res) => {
         const { password } = req.body || {};
+        
+        // 记录登录尝试
+        try {
+            recordLoginAttempts(req.ip);
+        } catch (error) {
+            return res.status(429).json({ ok: false, error: error.message });
+        }
+        
         const input = String(password || '');
         const storedHash = store.getAdminPasswordHash ? store.getAdminPasswordHash() : '';
         let ok = false;
+        
         if (storedHash) {
-            ok = hashPassword(input) === storedHash;
+            // 优先使用安全验证 (支持PBKDF2和SHA256)
+            ok = await verifyPassword(input, storedHash);
         } else {
+            // 兼容旧配置
             ok = input === String(CONFIG.adminPassword || '');
         }
+        
         if (!ok) {
             return res.status(401).json({ ok: false, error: 'Invalid password' });
         }
+        
+        // 登录成功
+        clearLoginAttempts(req.ip);
         const token = issueToken();
         tokens.add(token);
         res.json({ ok: true, data: { token } });
