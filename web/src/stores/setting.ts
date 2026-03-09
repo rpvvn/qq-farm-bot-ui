@@ -17,6 +17,7 @@ export interface AutomationConfig {
   fertilizer_multi_season?: boolean
   fertilizer_land_types?: string[]
   friend_steal?: boolean
+  friend_steal_blacklist?: number[]
   friend_help?: boolean
   friend_bad?: boolean
   open_server_gift?: boolean
@@ -45,6 +46,7 @@ export interface OfflineConfig {
   title: string
   msg: string
   offlineDeleteSec: number
+  offlineDeleteEnabled: boolean
   custom_headers?: string
   custom_body?: string
 }
@@ -83,7 +85,8 @@ export const useSettingStore = defineStore('setting', () => {
       token: '',
       title: '账号下线提醒',
       msg: '账号下线',
-      offlineDeleteSec: 9999999999,
+      offlineDeleteSec: 1,
+      offlineDeleteEnabled: false,
       custom_headers: '',
       custom_body: '',
     },
@@ -116,7 +119,8 @@ export const useSettingStore = defineStore('setting', () => {
           token: '',
           title: '账号下线提醒',
           msg: '账号下线',
-          offlineDeleteSec: 9999999999,
+          offlineDeleteSec: 1,
+          offlineDeleteEnabled: false,
           custom_headers: '',
           custom_body: '',
           ...(d.offlineReminder || {}),

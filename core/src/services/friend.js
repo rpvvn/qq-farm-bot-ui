@@ -5,7 +5,7 @@
 const { CONFIG, PlantPhase, PHASE_NAMES } = require('../config/config');
 const { getPlantName, getPlantById, getSeedImageBySeedId } = require('../config/gameConfig');
 const { parentPort } = require('node:worker_threads');
-const { isAutomationOn, getFriendQuietHours, getFriendBlacklist } = require('../models/store');
+const { isAutomationOn, getFriendQuietHours, getFriendBlacklist, getAutomation } = require('../models/store');
 const { sendMsgAsync, getUserState, networkEvents } = require('../utils/network');
 const { types } = require('../utils/proto');
 const { toLong, toNum, toTimeSec, getServerTimeSec, log, logWarn, sleep } = require('../utils/utils');
@@ -41,6 +41,23 @@ const OP_NAMES = {
 
 let canGetHelpExp = true;
 let helpAutoDisabledByLimit = false;
+
+function normalizeStealPlantBlacklist(input) {
+    const source = Array.isArray(input) ? input : [];
+    const normalized = [];
+    for (const item of source) {
+        const value = Number.parseInt(item, 10);
+        if (!Number.isFinite(value) || value <= 0) continue;
+        if (normalized.includes(value)) continue;
+        normalized.push(value);
+    }
+    return normalized;
+}
+
+function getStealPlantBlacklistSet() {
+    const automation = getAutomation() || {};
+    return new Set(normalizeStealPlantBlacklist(automation.friend_steal_blacklist));
+}
 
 function parseTimeToMinutes(timeStr) {
     const m = String(timeStr || '').match(/^(\d{1,2}):(\d{1,2})$/);
@@ -423,7 +440,9 @@ async function checkCanOperateRemote(friendGid, operationId) {
 
 // ============ 好友土地分析 ============
 
-function analyzeFriendLands(lands, myGid, friendName = '') {
+function analyzeFriendLands(lands, myGid, friendName = '', options = {}) {
+    const stealPlantBlacklistSet = options.stealPlantBlacklistSet instanceof Set ? options.stealPlantBlacklistSet : null;
+
     const result = {
         stealable: [],   // 可偷
         stealableInfo: [],  // 可偷植物信息 { landId, plantId, name }
@@ -450,8 +469,11 @@ function analyzeFriendLands(lands, myGid, friendName = '') {
 
         if (phaseVal === PlantPhase.MATURE) {
             if (plant.stealable) {
-                result.stealable.push(id);
                 const plantId = toNum(plant.id);
+                if (stealPlantBlacklistSet && plantId > 0 && stealPlantBlacklistSet.has(plantId)) {
+                    continue;
+                }
+                result.stealable.push(id);
                 const plantName = getPlantName(plantId) || plant.name || '未知';
                 result.stealableInfo.push({ landId: id, plantId, name: plantName });
             }
@@ -740,7 +762,7 @@ async function doFriendOperation(friendGid, opType) {
 
 // ============ 拜访好友 ============
 
-async function visitFriend(friend, totalActions, myGid) {
+async function visitFriend(friend, totalActions, myGid, options = {}) {
     const { gid, name } = friend;
 
     let enterReply;
@@ -763,7 +785,7 @@ async function visitFriend(friend, totalActions, myGid) {
         return;
     }
 
-    const status = analyzeFriendLands(lands, myGid, name);
+    const status = analyzeFriendLands(lands, myGid, name, options);
 
     // 执行操作
     const actions = [];
@@ -947,6 +969,7 @@ async function checkFriends() {
         }
 
         const totalActions = { steal: 0, water: 0, weed: 0, bug: 0, putBug: 0, putWeed: 0 };
+        const stealPlantBlacklistSet = getStealPlantBlacklistSet();
 
         for (let i = 0; i < friendsToVisit.length; i++) {
             const friend = friendsToVisit[i];
@@ -957,7 +980,7 @@ async function checkFriends() {
             }
 
             try {
-                await visitFriend(friend, totalActions, state.gid);
+                await visitFriend(friend, totalActions, state.gid, { stealPlantBlacklistSet });
             } catch {
                 // 单个好友访问失败不影响整体
             }

@@ -4,7 +4,7 @@
 
 const protobuf = require('protobufjs');
 const { CONFIG, PlantPhase, PHASE_NAMES } = require('../config/config');
-const { getPlantNameBySeedId, getPlantName, getPlantExp, formatGrowTime, getPlantGrowTime, getAllSeeds, getPlantById, getSeedImageBySeedId } = require('../config/gameConfig');
+const { getPlantNameBySeedId, getPlantName, getPlantExp, formatGrowTime, getPlantGrowTime, getAllSeeds, getPlantById, getPlantBySeedId, getSeedImageBySeedId } = require('../config/gameConfig');
 const { isAutomationOn, getPreferredSeed, getAutomation, getPlantingStrategy } = require('../models/store');
 const { sendMsgAsync, getUserState, networkEvents, getWsErrorState } = require('../utils/network');
 const { types } = require('../utils/proto');
@@ -512,13 +512,19 @@ async function getAvailableSeeds() {
                 const limitCount = toNum(goods.limit_count);
                 const boughtNum = toNum(goods.bought_num);
                 const isSoldOut = limitCount > 0 && boughtNum >= limitCount;
-    
+
+                const seedId = toNum(goods.item_id);
+                const plantCfg = getPlantBySeedId(seedId);
+                const plantId = toNum(plantCfg && plantCfg.id);
+
                 list.push({
-                    seedId: toNum(goods.item_id),
+                    seedId,
+                    plantId,
                     goodsId: toNum(goods.id),
-                    name: getPlantNameBySeedId(toNum(goods.item_id)),
+                    name: getPlantNameBySeedId(seedId),
                     price: toNum(goods.price),
                     requiredLevel,
+                    image: getSeedImageBySeedId(seedId),
                     locked: !goods.unlocked || state.level < requiredLevel,
                     soldOut: isSoldOut,
                 });
