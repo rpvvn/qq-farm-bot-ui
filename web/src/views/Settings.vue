@@ -658,7 +658,6 @@ function resetBagSeedPriority() {
 }
 
 const dragIndex = ref<number | null>(null)
-const dropTargetIndex = ref<number | null>(null)
 
 function onDragStart(e: DragEvent, index: number) {
   dragIndex.value = index
@@ -667,24 +666,13 @@ function onDragStart(e: DragEvent, index: number) {
   }
 }
 
-function onDragOver(e: DragEvent, index: number) {
+function onDragOver(e: DragEvent) {
   e.preventDefault()
-  if (dragIndex.value !== null && dragIndex.value !== index) {
-    dropTargetIndex.value = index
-  }
-}
-
-function onDragLeave(e: DragEvent) {
-  const relatedTarget = e.relatedTarget as HTMLElement | null
-  if (!relatedTarget || !e.currentTarget || !(e.currentTarget as HTMLElement).contains(relatedTarget)) {
-    dropTargetIndex.value = null
-  }
 }
 
 function onDrop(targetIndex: number) {
   if (dragIndex.value === null || dragIndex.value === targetIndex) {
     dragIndex.value = null
-    dropTargetIndex.value = null
     return
   }
 
@@ -697,12 +685,10 @@ function onDrop(targetIndex: number) {
 
   localSettings.value.bagSeedPriority = newPriority
   dragIndex.value = null
-  dropTargetIndex.value = null
 }
 
 function onDragEnd() {
   dragIndex.value = null
-  dropTargetIndex.value = null
 }
 
 watch(() => localSettings.value.plantingStrategy, (newVal) => {
@@ -947,73 +933,53 @@ async function handleTestOffline() {
               <div
                 v-for="(seed, index) in sortedBagSeeds"
                 :key="seed.seedId"
-                class="relative"
+                draggable="true"
+                class="flex items-center gap-3 p-2 border rounded-lg cursor-grab select-none border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-800/50"
+                @dragstart="onDragStart($event, index)"
+                @dragover="onDragOver"
+                @drop="onDrop(index)"
+                @dragend="onDragEnd"
               >
-                <!-- 插入位置指示线（上方） -->
-                <div
-                  v-if="dropTargetIndex === index && dragIndex !== null && dragIndex > index"
-                  class="absolute -top-1 left-0 right-0 h-0.5 bg-blue-500 rounded"
-                />
-                <div
-                  draggable="true"
-                  class="flex items-center gap-3 p-2 border rounded-lg cursor-grab select-none"
-                  :class="[
-                    dragIndex === index
-                      ? 'opacity-50 border-dashed border-gray-400 bg-gray-100 dark:bg-gray-700'
-                      : 'border-gray-200 bg-gray-50 dark:border-gray-600 dark:bg-gray-800/50 hover:border-gray-300 dark:hover:border-gray-500'
-                  ]"
-                  @dragstart="onDragStart($event, index)"
-                  @dragover="onDragOver($event, index)"
-                  @dragleave="onDragLeave"
-                  @drop="onDrop(index)"
-                  @dragend="onDragEnd"
+                <div class="flex items-center gap-1 text-gray-400 dark:text-gray-500">
+                  <div class="i-carbon-draggable text-lg" />
+                  <span class="w-5 text-center text-sm font-medium">{{ index + 1 }}</span>
+                </div>
+                <img
+                  v-if="seed.image"
+                  :src="seed.image"
+                  :alt="seed.name"
+                  class="w-8 h-8 object-contain pointer-events-none"
                 >
-                  <div class="flex items-center gap-1 text-gray-400 dark:text-gray-500">
-                    <div class="i-carbon-draggable text-lg" />
-                    <span class="w-5 text-center text-sm font-medium">{{ index + 1 }}</span>
+                <div v-else class="w-8 h-8 bg-gray-200 rounded dark:bg-gray-700 pointer-events-none" />
+                <div class="flex-1 min-w-0 pointer-events-none">
+                  <div class="flex items-center gap-2">
+                    <span
+                      v-if="seed.requiredLevel >= 200"
+                      class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded dark:bg-yellow-900/50 dark:text-yellow-400"
+                    >活动</span>
+                    <span class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{{ seed.name }}</span>
                   </div>
-                  <img
-                    v-if="seed.image"
-                    :src="seed.image"
-                    :alt="seed.name"
-                    class="w-8 h-8 object-contain pointer-events-none"
-                  >
-                  <div v-else class="w-8 h-8 bg-gray-200 rounded dark:bg-gray-700 pointer-events-none" />
-                  <div class="flex-1 min-w-0 pointer-events-none">
-                    <div class="flex items-center gap-2">
-                      <span
-                        v-if="seed.requiredLevel >= 200"
-                        class="px-1.5 py-0.5 text-xs bg-yellow-100 text-yellow-700 rounded dark:bg-yellow-900/50 dark:text-yellow-400"
-                      >活动</span>
-                      <span class="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{{ seed.name }}</span>
-                    </div>
-                    <div class="text-xs text-gray-500 dark:text-gray-400">
-                      数量: {{ seed.count }} | {{ seed.requiredLevel >= 200 ? '活动种子' : `${seed.requiredLevel}级` }}
-                      <span v-if="seed.plantSize > 1"> | {{ seed.plantSize }}x{{ seed.plantSize }}</span>
-                    </div>
-                  </div>
-                  <div class="flex flex-col gap-1">
-                    <button
-                      class="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-30"
-                      :disabled="index === 0"
-                      @click.stop="moveSeedUp(index)"
-                    >
-                      <div class="i-carbon-chevron-up" />
-                    </button>
-                    <button
-                      class="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-30"
-                      :disabled="index === sortedBagSeeds.length - 1"
-                      @click.stop="moveSeedDown(index)"
-                    >
-                      <div class="i-carbon-chevron-down" />
-                    </button>
+                  <div class="text-xs text-gray-500 dark:text-gray-400">
+                    数量: {{ seed.count }} | {{ seed.requiredLevel >= 200 ? '活动种子' : `${seed.requiredLevel}级` }}
+                    <span v-if="seed.plantSize > 1"> | {{ seed.plantSize }}x{{ seed.plantSize }}</span>
                   </div>
                 </div>
-                <!-- 插入位置指示线（下方） -->
-                <div
-                  v-if="dropTargetIndex === index && dragIndex !== null && dragIndex < index"
-                  class="absolute -bottom-1 left-0 right-0 h-0.5 bg-blue-500 rounded"
-                />
+                <div class="flex flex-col gap-1">
+                  <button
+                    class="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-30"
+                    :disabled="index === 0"
+                    @click.stop="moveSeedUp(index)"
+                  >
+                    <div class="i-carbon-chevron-up" />
+                  </button>
+                  <button
+                    class="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 disabled:opacity-30"
+                    :disabled="index === sortedBagSeeds.length - 1"
+                    @click.stop="moveSeedDown(index)"
+                  >
+                    <div class="i-carbon-chevron-down" />
+                  </button>
+                </div>
               </div>
             </div>
             <div class="mt-2 text-xs text-gray-500 dark:text-gray-400 space-y-1">

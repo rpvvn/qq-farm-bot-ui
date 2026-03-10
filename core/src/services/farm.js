@@ -461,6 +461,22 @@ function getPlantSizeBySeedId(seedId) {
 }
 
 /**
+ * 种植大尺寸种子 (2x2 等)，一次性传入所有地块 ID
+ */
+async function plantLargeSeed(seedId, landIds) {
+    try {
+        const body = encodePlantRequest(seedId, landIds);
+        const { body: replyBody } = await sendMsgAsync('gamepb.plantpb.PlantService', 'Plant', body);
+        const reply = types.PlantReply.decode(replyBody);
+        const changedLands = Array.isArray(reply && reply.land) ? reply.land : [];
+        return changedLands.length > 0;
+    } catch (e) {
+        logWarn('种植', `大尺寸种子种植失败: ${e.message}`);
+        return false;
+    }
+}
+
+/**
  * 种植 - 游戏中拖动种植间隔很短，这里用 50ms
  */
 async function plantSeeds(seedId, landIds, options = {}) {
@@ -889,119 +905,73 @@ async function plantFromBagSeeds(landsToPlant) {
     });
     const sortedSeeds = sortBagSeedsByPriority(bagSeeds, priority);
 
-    // 按用户优先级遍历种子，检查是否有连续地块可种植
+    // 按用户优先级遍历种子，找到第一个可用的 1x1 种子
     let availableSeed = null;
-    let plantSize = 1;
-    let contiguousGroups = [];
 
     for (const seed of sortedSeeds) {
         if (seed.count <= 0) continue;
         const size = seed.plantSize || 1;
 
+        // 跳过大尺寸种子 (2x2 等)
         if (size > 1) {
-            // 大尺寸种子需要检测连续地块
-            const groups = findContiguousLandGroups(landsToPlant, size);
-            if (groups.length > 0) {
-                availableSeed = seed;
-                plantSize = size;
-                contiguousGroups = groups;
-                log('种植', `${seed.name} 是 ${size}x${size} 种子，找到 ${groups.length} 组连续地块`, {
-                    module: 'farm', event: 'bag_seed_contiguous', seedId: seed.seedId, size, groups: groups.length
-                });
-                break;
-            } else {
-                log('种植', `${seed.name} 是 ${size}x${size} 种子，无连续 ${size}x${size} 空地，跳过`, {
-                    module: 'farm', event: 'bag_seed_no_contiguous', seedId: seed.seedId, size
-                });
-                continue;
-            }
-        } else {
-            // 1x1 种子直接使用
-            if (landsToPlant.length > 0) {
-                availableSeed = seed;
-                plantSize = 1;
-                contiguousGroups = landsToPlant.map(id => [id]);
-                break;
-            }
+            log('种植', `${seed.name} 是 ${size}x${size} 种子，暂不支持，跳过`, {
+                module: 'farm', event: 'bag_seed_skip_large', seedId: seed.seedId, size
+            });
+            continue;
+        }
+
+        // 1x1 种子直接使用
+        if (landsToPlant.length > 0) {
+            availableSeed = seed;
+            break;
         }
     }
 
     if (!availableSeed) {
-        // 检查是否所有种子都用完了
-        const hasAnySeeds = sortedSeeds.some(s => s.count > 0);
-        if (!hasAnySeeds) {
-            log('种植', '背包种子已用完，自动切换为最高等级策略', {
+        // 检查是否有 1x1 种子
+        const has1x1Seeds = sortedSeeds.some(s => s.count > 0 && (s.plantSize || 1) === 1);
+        if (!has1x1Seeds) {
+            log('种植', '背包无可用 1x1 种子，自动切换为最高等级策略', {
                 module: 'farm', event: 'bag_seeds_exhausted', result: 'switch_strategy'
             });
             setPlantingStrategy(undefined, 'level');
             return false;
         }
-        // 有种子但无法种植（可能是大尺寸种子但没有连续空地）
-        log('种植', '背包有种子但无合适空地，等待更多空地', {
-            module: 'farm', event: 'bag_seed_wait_land', result: 'wait'
-        });
-        return true; // 等待
+        return true;
     }
 
     // 计算能种多少
-    let needCount = Math.min(contiguousGroups.length, availableSeed.count);
-
+    const needCount = Math.min(landsToPlant.length, availableSeed.count);
     if (needCount <= 0) {
-        return true; // 等待
+        return true;
     }
 
     // 种植背包种子
     let plantedLands = [];
     let totalPlanted = 0;
 
-    if (plantSize > 1) {
-        // 大尺寸种子：逐组种植，每组只种植左上角的地块
-        for (let i = 0; i < needCount; i++) {
-            const group = contiguousGroups[i];
-            // 找到左上角的地块（ID 最小的）
-            const topLeftLandId = Math.min(...group);
-            try {
-                const { planted, plantedLandIds } = await plantSeeds(
-                    availableSeed.seedId,
-                    [topLeftLandId],
-                    { maxPlantCount: 1 }
-                );
-                if (planted > 0) {
-                    totalPlanted++;
-                    plantedLands.push(...plantedLandIds);
-                }
-            } catch (e) {
-                logWarn('种植', `土地#${topLeftLandId} 种植失败: ${e.message}`);
-            }
-        }
-    } else {
-        // 1x1 种子：批量种植
-        const landsToUse = contiguousGroups.slice(0, needCount).map(g => g[0]);
-        try {
-            const { planted, plantedLandIds } = await plantSeeds(
-                availableSeed.seedId,
-                landsToUse,
-                { maxPlantCount: needCount }
-            );
-            totalPlanted = planted;
-            plantedLands = plantedLandIds;
-        } catch (e) {
-            logWarn('种植', `背包种子种植失败: ${e.message}`);
-            return false;
-        }
+    const landsToUse = landsToPlant.slice(0, needCount);
+    try {
+        const { planted, plantedLandIds } = await plantSeeds(
+            availableSeed.seedId,
+            landsToUse,
+            { maxPlantCount: needCount }
+        );
+        totalPlanted = planted;
+        plantedLands = plantedLandIds;
+    } catch (e) {
+        logWarn('种植', `背包种子种植失败: ${e.message}`);
+        return false;
     }
 
     const isEvent = availableSeed.requiredLevel >= 200;
     const seedLabel = isEvent ? `[活动] ${availableSeed.name}` : availableSeed.name;
-    log('种植', plantSize > 1
-        ? `使用背包种子 ${seedLabel} 种植 ${totalPlanted} 组 ${plantSize}x${plantSize}，占用 ${totalPlanted * plantSize * plantSize} 块地`
-        : `使用背包种子 ${seedLabel} 种植 ${totalPlanted} 块地`, {
+    log('种植', `使用背包种子 ${seedLabel} 种植 ${totalPlanted} 块地`, {
         module: 'farm',
         event: 'bag_seed_plant',
         result: 'ok',
         seedId: availableSeed.seedId,
         count: totalPlanted,
-        plantSize,
         isEvent,
     });
 
