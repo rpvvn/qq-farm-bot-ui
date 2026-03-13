@@ -154,8 +154,15 @@ jobs:
         id: changelog
         run: |
           if [ -f "Update.log" ]; then
-            # 提取第一段更新日志（从开头到第二个日期行之前，匹配格式：YYYY-MM-DD）
-            CHANGELOG=$(awk 'NR==1,/^[0-9]{4}-[0-9]{2}-[0-9]{2}/ {if(NR>1 && /^[0-9]{4}-[0-9]{2}-[0-9]{2}/) exit; print}' Update.log | sed -e :a -e '/^\s*$/d;N;/\n$/ba')
+            # 提取第一段更新日志（从第一行开始，到遇到第二个日期行时停止）
+            CHANGELOG=$(awk '
+              BEGIN { date_count=0 }
+              /^[0-9]{4}-[0-9]{2}-[0-9]{2}/ { 
+                date_count++
+                if(date_count == 2) exit
+              }
+              date_count == 1 { print }
+            ' Update.log | sed -e :a -e '/^\s*$/N; s/\n\s*\n\s*\n\s*\n/\n\n/; ta')
             
             if [ -z "$CHANGELOG" ]; then
               CHANGELOG="自动构建发布"
