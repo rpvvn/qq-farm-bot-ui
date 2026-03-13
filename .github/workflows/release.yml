@@ -32,12 +32,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 获取完整历史，用于版本号计算
+          fetch-depth: 0
 
       - name: Get Latest Tag
         id: get_tag
         run: |
-          # 获取最新的版本标签，如果没有则默认 v0.0.0
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
           echo "当前最新版本: $LATEST_TAG"
@@ -48,14 +47,11 @@ jobs:
           LATEST_TAG="${{ steps.get_tag.outputs.latest_tag }}"
           VERSION_INPUT="${{ github.event.inputs.version }}"
           
-          # 去掉 v 前缀
           CURRENT_VERSION=${LATEST_TAG#v}
           
-          # 如果是手动触发且指定了具体版本号（如 1.2.3）
           if [[ "$VERSION_INPUT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             NEW_VERSION="$VERSION_INPUT"
           else
-            # 自动递增版本号（默认 patch）
             BUMP_TYPE="${VERSION_INPUT:-patch}"
             IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
             
@@ -111,7 +107,7 @@ jobs:
       - name: Build
         run: pnpm package:release
 
-      - name: List Artifacts (调试用，确认产物存在)
+      - name: List Artifacts
         run: ls -R core/dist
 
       - name: Upload Windows
@@ -158,15 +154,13 @@ jobs:
         id: changelog
         run: |
           if [ -f "Update.log" ]; then
-            # 提取最新的更新日志（从第一个 ## 更新日至 到下一个 ## 更新日至 之前）
-            CHANGELOG=$(awk '/^## 更新日志/{flag=1; next} /^## 更新日志/{flag=0} flag' Update.log | sed '/^$/d')
+            # 提取第一段更新日志（从开头到第二个日期行之前，匹配格式：YYYY-MM-DD）
+            CHANGELOG=$(awk 'NR==1,/^[0-9]{4}-[0-9]{2}-[0-9]{2}/ {if(NR>1 && /^[0-9]{4}-[0-9]{2}-[0-9]{2}/) exit; print}' Update.log | sed -e :a -e '/^\s*$/d;N;/\n$/ba')
             
-            # 如果提取为空，使用默认描述
             if [ -z "$CHANGELOG" ]; then
               CHANGELOG="自动构建发布"
             fi
             
-            # 输出到 GitHub Output（处理多行文本）
             echo "content<<EOF" >> $GITHUB_OUTPUT
             echo "$CHANGELOG" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
