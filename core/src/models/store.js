@@ -70,6 +70,10 @@ const DEFAULT_ACCOUNT_CONFIG = {
         email: true,
         fertilizer_gift: false,
         fertilizer_buy: false,
+        fertilizer_buy_type: 'organic',
+        fertilizer_buy_max: 10,
+        fertilizer_buy_mode: 'threshold',
+        fertilizer_buy_threshold: 100,
         free_gifts: true,
         share_reward: true,
         vip_gift: true,
@@ -123,6 +127,7 @@ const globalConfig = {
     qrLogin: { ...DEFAULT_QR_LOGIN },
     runtimeClient: { ...DEFAULT_RUNTIME_CLIENT, device_info: { ...DEFAULT_RUNTIME_CLIENT.device_info } },
     adminPasswordHash: '',
+    disablePasswordAuth: false,
 };
 
 function normalizeOfflineReminder(input) {
@@ -342,6 +347,16 @@ function normalizeBagSeedPriority(input) {
     return normalized;
 }
 
+function normalizeFertilizerBuyAutomation(automation) {
+    const next = (automation && typeof automation === 'object') ? automation : {};
+    const mode = String(next.fertilizer_buy_mode || '').trim().toLowerCase();
+    const type = String(next.fertilizer_buy_type || '').trim().toLowerCase();
+    if (mode === 'unlimited' && type === 'both') {
+        next.fertilizer_buy_type = 'organic';
+    }
+    return next;
+}
+
 function normalizeFriendCache(input) {
     if (!Array.isArray(input)) return [];
     const seen = new Set();
@@ -395,6 +410,7 @@ function cloneAccountConfig(base = DEFAULT_ACCOUNT_CONFIG) {
         }
         if (srcAutomation[key] !== undefined) automation[key] = srcAutomation[key];
     }
+    normalizeFertilizerBuyAutomation(automation);
 
     const rawBlacklist = Array.isArray(base.friendBlacklist) ? base.friendBlacklist : [];
     const rawFriendCache = Array.isArray(base.friendCache) ? base.friendCache : [];
@@ -431,6 +447,16 @@ function normalizeAccountConfig(input, fallback = accountFallbackConfig) {
             if (k === 'fertilizer') {
                 const allowed = ['both', 'normal', 'organic', 'none'];
                 cfg.automation[k] = allowed.includes(v) ? v : cfg.automation[k];
+            } else if (k === 'fertilizer_buy_type') {
+                cfg.automation[k] = ['organic', 'normal', 'both'].includes(v) ? v : cfg.automation[k];
+            } else if (k === 'fertilizer_buy_mode') {
+                cfg.automation[k] = ['threshold', 'unlimited'].includes(v) ? v : cfg.automation[k];
+            } else if (k === 'fertilizer_buy_max') {
+                const n = Number(v);
+                cfg.automation[k] = (Number.isFinite(n) && n >= 1 && n <= 10) ? Math.floor(n) : cfg.automation[k];
+            } else if (k === 'fertilizer_buy_threshold') {
+                const n = Number(v);
+                cfg.automation[k] = (Number.isFinite(n) && n >= 0) ? n : cfg.automation[k];
             } else if (k === 'fertilizer_land_types') {
                 cfg.automation[k] = normalizeFertilizerLandTypes(v, cfg.automation[k]);
             } else if (k === 'friend_steal_blacklist') {
@@ -439,6 +465,7 @@ function normalizeAccountConfig(input, fallback = accountFallbackConfig) {
                 cfg.automation[k] = !!v;
             }
         }
+        normalizeFertilizerBuyAutomation(cfg.automation);
     }
 
     if (src.plantingStrategy && ALLOWED_PLANTING_STRATEGIES.includes(src.plantingStrategy)) {
@@ -582,6 +609,9 @@ function loadGlobalConfig() {
             if (typeof data.adminPasswordHash === 'string') {
                 globalConfig.adminPasswordHash = data.adminPasswordHash;
             }
+            if (typeof data.disablePasswordAuth === 'boolean') {
+                globalConfig.disablePasswordAuth = data.disablePasswordAuth;
+            }
         }
     } catch (e) {
         console.error('加载配置失败:', e.message);
@@ -641,6 +671,16 @@ function setAdminPasswordHash(hash) {
     return globalConfig.adminPasswordHash;
 }
 
+function getDisablePasswordAuth() {
+    return Boolean(globalConfig.disablePasswordAuth);
+}
+
+function setDisablePasswordAuth(disabled) {
+    globalConfig.disablePasswordAuth = Boolean(disabled);
+    saveGlobalConfig();
+    return globalConfig.disablePasswordAuth;
+}
+
 // 初始化加载
 loadGlobalConfig();
 
@@ -680,6 +720,16 @@ function applyConfigSnapshot(snapshot, options = {}) {
             if (k === 'fertilizer') {
                 const allowed = ['both', 'normal', 'organic', 'none'];
                 next.automation[k] = allowed.includes(v) ? v : next.automation[k];
+            } else if (k === 'fertilizer_buy_type') {
+                next.automation[k] = ['organic', 'normal', 'both'].includes(v) ? v : next.automation[k];
+            } else if (k === 'fertilizer_buy_mode') {
+                next.automation[k] = ['threshold', 'unlimited'].includes(v) ? v : next.automation[k];
+            } else if (k === 'fertilizer_buy_max') {
+                const n = Number(v);
+                next.automation[k] = (Number.isFinite(n) && n >= 1 && n <= 10) ? Math.floor(n) : next.automation[k];
+            } else if (k === 'fertilizer_buy_threshold') {
+                const n = Number(v);
+                next.automation[k] = (Number.isFinite(n) && n >= 0) ? n : next.automation[k];
             } else if (k === 'fertilizer_land_types') {
                 next.automation[k] = normalizeFertilizerLandTypes(v, next.automation[k]);
             } else if (k === 'friend_steal_blacklist') {
@@ -688,6 +738,7 @@ function applyConfigSnapshot(snapshot, options = {}) {
                 next.automation[k] = !!v;
             }
         }
+        normalizeFertilizerBuyAutomation(next.automation);
     }
 
     if (cfg.plantingStrategy && ALLOWED_PLANTING_STRATEGIES.includes(cfg.plantingStrategy)) {
@@ -914,11 +965,19 @@ function addOrUpdateAccount(acc) {
     } else {
         const id = data.nextId++;
         touchedAccountId = String(id);
+        const defaultName = String(
+            acc.name
+            || acc.nick
+            || (acc.gid ? `GID:${acc.gid}` : '')
+            || '',
+        ).trim() || `账号${id}`;
         data.accounts.push({
             id: touchedAccountId,
-            name: acc.name || `账号${id}`,
+            name: defaultName,
             code: acc.code || '',
             platform: acc.platform || 'qq',
+            gid: acc.gid ? String(acc.gid) : '',
+            openId: acc.openId ? String(acc.openId) : '',
             uin: acc.uin ? String(acc.uin) : '',
             qq: acc.qq ? String(acc.qq) : (acc.uin ? String(acc.uin) : ''),
             avatar: acc.avatar || acc.avatarUrl || '',
@@ -992,4 +1051,6 @@ module.exports = {
     deleteAccount,
     getAdminPasswordHash,
     setAdminPasswordHash,
+    getDisablePasswordAuth,
+    setDisablePasswordAuth,
 };

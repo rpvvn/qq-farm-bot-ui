@@ -135,7 +135,6 @@ async function handleImportGids() {
   }, 3000)
 }
 
-
 useIntervalFn(() => {
   for (const gid in friendLands.value) {
     if (friendLands.value[gid]) {
@@ -731,8 +730,8 @@ function formatInteractTime(timestamp: number) {
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       @click.self="showImportGidModal = false"
     >
-      <div class="mx-4 w-full max-w-md rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
-        <h3 class="mb-4 text-lg font-semibold text-gray-800 dark:text-gray-100">
+      <div class="mx-4 max-w-md w-full rounded-lg bg-white p-6 shadow-xl dark:bg-gray-800">
+        <h3 class="mb-4 text-lg text-gray-800 font-semibold dark:text-gray-100">
           导入好友 GID
         </h3>
         <p class="mb-3 text-sm text-gray-500 dark:text-gray-400">

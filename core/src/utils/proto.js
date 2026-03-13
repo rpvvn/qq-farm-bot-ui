@@ -147,6 +147,7 @@ const typeMappings = [
 ];
 
 async function loadProto() {
+    if (root) return root;
     log('系统', '正在加载 Protobuf 定义...');
     root = new protobuf.Root();
 
@@ -162,6 +163,7 @@ async function loadProto() {
 
     // Proto 加载完成
     log('系统', 'Protobuf 定义加载完成');
+    return root;
 }
 
 function getRoot() {
