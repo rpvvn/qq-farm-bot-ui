@@ -154,6 +154,26 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R .
 
+      - name: Extract Latest Changelog
+        id: changelog
+        run: |
+          if [ -f "Update.log" ]; then
+            # 提取最新的更新日志（从第一个 ## 更新日至 到下一个 ## 更新日至 之前）
+            CHANGELOG=$(awk '/^## 更新日志/{flag=1; next} /^## 更新日志/{flag=0} flag' Update.log | sed '/^$/d')
+            
+            # 如果提取为空，使用默认描述
+            if [ -z "$CHANGELOG" ]; then
+              CHANGELOG="自动构建发布"
+            fi
+            
+            # 输出到 GitHub Output（处理多行文本）
+            echo "content<<EOF" >> $GITHUB_OUTPUT
+            echo "$CHANGELOG" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "content=Update.log 文件不存在" >> $GITHUB_OUTPUT
+          fi
+
       - name: Release
         uses: ncipollo/release-action@v1
         with:
@@ -161,7 +181,11 @@ jobs:
           tag: ${{ needs.version.outputs.new_tag }}
           body: |
             ## ${{ needs.version.outputs.new_tag }}
-            自动构建发布，包含多平台产物：
+            
+            ${{ steps.changelog.outputs.content }}
+            
+            ---
+            **多平台产物：**
             - Windows x64
             - Linux x64
             - MacOS Intel (x64)
