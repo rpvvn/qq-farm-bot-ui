@@ -82,8 +82,15 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag ${{ steps.bump.outputs.new_tag }}
-          git push origin ${{ steps.bump.outputs.new_tag }}
+          
+          # 检查 tag 是否已存在
+          if git rev-parse "${{ steps.bump.outputs.new_tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ steps.bump.outputs.new_tag }} 已存在，跳过创建"
+          else
+            git tag ${{ steps.bump.outputs.new_tag }}
+            git push origin ${{ steps.bump.outputs.new_tag }}
+            echo "Tag ${{ steps.bump.outputs.new_tag }} 创建成功"
+          fi
 
   build:
     runs-on: ubuntu-latest
