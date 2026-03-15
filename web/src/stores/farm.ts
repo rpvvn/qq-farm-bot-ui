@@ -15,6 +15,8 @@ export interface Land {
   [key: string]: any
 }
 
+export type SingleLandAction = 'remove' | 'plant' | 'organic_fertilize'
+
 export const useFarmStore = defineStore('farm', () => {
   const lands = ref<Land[]>([])
   const seeds = ref<any[]>([])
@@ -49,6 +51,16 @@ export const useFarmStore = defineStore('farm', () => {
       seeds.value = data.data || []
   }
 
+  async function fetchBagSeeds(accountId: string) {
+    if (!accountId)
+      return
+    const { data } = await api.get('/api/bag/seeds', {
+      headers: { 'x-account-id': accountId },
+    })
+    if (data && data.ok)
+      seeds.value = data.data || []
+  }
+
   async function operate(accountId: string, opType: string) {
     if (!accountId)
       return
@@ -58,5 +70,20 @@ export const useFarmStore = defineStore('farm', () => {
     await fetchLands(accountId)
   }
 
-  return { lands, summary, seeds, loading, fetchLands, fetchSeeds, operate }
+  async function operateSingleLand(accountId: string, payload: { action: SingleLandAction, landId: number, seedId?: number }) {
+    if (!accountId)
+      return null
+    const body = {
+      action: payload.action,
+      landId: payload.landId,
+      seedId: payload.seedId || 0,
+    }
+    const { data } = await api.post('/api/farm/land/operate', body, {
+      headers: { 'x-account-id': accountId },
+    })
+    await fetchLands(accountId)
+    return data?.data || null
+  }
+
+  return { lands, summary, seeds, loading, fetchLands, fetchSeeds, fetchBagSeeds, operate, operateSingleLand }
 })

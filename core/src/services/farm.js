@@ -1727,6 +1727,49 @@ async function runFarmOperation(opType, options = {}) {
     return { hadWork: actions.length > 0, actions };
 }
 
+async function runSingleLandOperation(payload = {}) {
+    const action = String(payload.action || '').trim().toLowerCase();
+    const landId = toNum(payload.landId);
+    const seedId = toNum(payload.seedId);
+
+    if (!landId) {
+        throw new Error('无效 landId');
+    }
+
+    if (action === 'remove') {
+        await removePlant([landId]);
+        recordOperation('remove_plant', 1);
+        return { action, landId };
+    }
+
+    if (action === 'plant') {
+        if (!seedId) {
+            throw new Error('缺少 seedId');
+        }
+        const plantSize = getPlantSizeBySeedId(seedId);
+        if (plantSize > 1) {
+            throw new Error(`仅支持 1x1 种子，当前为 ${plantSize}x${plantSize}`);
+        }
+        const { planted } = await plantSeeds(seedId, [landId], { maxPlantCount: 1 });
+        if (!planted) {
+            throw new Error(`地块 #${landId} 种植失败`);
+        }
+        recordOperation('plant', 1);
+        return { action, landId, seedId, planted };
+    }
+
+    if (action === 'organic_fertilize') {
+        const fertilized = await fertilize([landId], ORGANIC_FERTILIZER_ID);
+        if (!fertilized) {
+            throw new Error(`地块 #${landId} 施有机肥失败`);
+        }
+        recordOperation('fertilize', fertilized);
+        return { action, landId, fertilized };
+    }
+
+    throw new Error(`不支持的单地块操作: ${action || 'unknown'}`);
+}
+
 function scheduleNextFarmCheck(delayMs = CONFIG.farmCheckInterval) {
     if (externalSchedulerMode) return;
     if (!farmLoopRunning) return;
@@ -1786,6 +1829,7 @@ module.exports = {
     getLandsDetail,
     getAvailableSeeds,
     runFarmOperation, // 导出新函数
+    runSingleLandOperation,
     runFertilizerByConfig,
     buildLandMap,
     getDisplayLandContext,

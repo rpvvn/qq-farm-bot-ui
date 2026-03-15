@@ -7,22 +7,143 @@ import LandCard from '@/components/LandCard.vue'
 import { useAccountStore } from '@/stores/account'
 import { useFarmStore } from '@/stores/farm'
 import { useStatusStore } from '@/stores/status'
+import { useToastStore } from '@/stores/toast'
 
 const farmStore = useFarmStore()
 const accountStore = useAccountStore()
 const statusStore = useStatusStore()
-const { lands, summary, loading } = storeToRefs(farmStore)
+const toastStore = useToastStore()
+const { lands, summary, loading, seeds } = storeToRefs(farmStore)
 const { currentAccountId, currentAccount } = storeToRefs(accountStore)
 const { status, loading: statusLoading, realtimeConnected } = storeToRefs(statusStore)
 const { width } = useWindowSize()
 
 const operating = ref(false)
+const singleOperating = ref(false)
 const confirmVisible = ref(false)
 const confirmConfig = ref({
   title: '',
   message: '',
   opType: '',
 })
+const contextMenuVisible = ref(false)
+const contextMenuX = ref(0)
+const contextMenuY = ref(0)
+const contextLand = ref<any>(null)
+const selectedLandId = ref(0)
+const seedDialogVisible = ref(false)
+const seedLoading = ref(false)
+const selectedSeedId = ref<number | null>(null)
+
+const contextMenuStyle = computed(() => ({
+  left: `${contextMenuX.value}px`,
+  top: `${contextMenuY.value}px`,
+}))
+
+const canSubmitSeedPlant = computed(() => {
+  if (!selectedSeedId.value)
+    return false
+  const seed = seeds.value.find(s => Number(s.seedId) === Number(selectedSeedId.value))
+  if (!seed)
+    return false
+  return Number(seed.count || 0) > 0 && Number(seed.plantSize || 1) <= 1
+})
+
+function getSafeImageUrl(url: string) {
+  if (!url)
+    return ''
+  if (url.startsWith('http://'))
+    return url.replace('http://', 'https://')
+  return url
+}
+
+function closeContextMenu() {
+  contextMenuVisible.value = false
+}
+
+function closeSeedDialog() {
+  seedDialogVisible.value = false
+  selectedSeedId.value = null
+}
+
+function handleWindowKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape')
+    return
+  closeContextMenu()
+  closeSeedDialog()
+}
+
+function openLandContextMenu(e: MouseEvent, land: any) {
+  const margin = 12
+  const maxX = Math.max(margin, window.innerWidth - 180)
+  const maxY = Math.max(margin, window.innerHeight - 168)
+  contextMenuX.value = Math.max(margin, Math.min(e.clientX, maxX))
+  contextMenuY.value = Math.max(margin, Math.min(e.clientY, maxY))
+  contextLand.value = land
+  selectedLandId.value = Number(land?.id || 0)
+  contextMenuVisible.value = true
+}
+
+async function executeSingleLandAction(action: 'remove' | 'plant' | 'organic_fertilize', seedId = 0) {
+  if (!currentAccountId.value || !selectedLandId.value)
+    return
+  singleOperating.value = true
+  try {
+    await farmStore.operateSingleLand(currentAccountId.value, {
+      action,
+      landId: selectedLandId.value,
+      seedId,
+    })
+    const actionTextMap: Record<string, string> = {
+      remove: '铲除',
+      plant: '种植',
+      organic_fertilize: '施有机肥',
+    }
+    toastStore.success(`地块 #${selectedLandId.value} 已执行${actionTextMap[action]}`)
+  }
+  catch (e: any) {
+    toastStore.error(e?.response?.data?.error || e?.message || '单地块操作失败')
+  }
+  finally {
+    singleOperating.value = false
+  }
+}
+
+async function openSeedDialog() {
+  if (!currentAccountId.value || !selectedLandId.value)
+    return
+  seedLoading.value = true
+  try {
+    await farmStore.fetchBagSeeds(currentAccountId.value)
+    seedDialogVisible.value = true
+    const firstEnabled = seeds.value.find(s => Number(s.count || 0) > 0 && Number(s.plantSize || 1) <= 1)
+    selectedSeedId.value = firstEnabled ? Number(firstEnabled.seedId) : null
+  }
+  catch {
+    toastStore.error('获取背包种子失败')
+  }
+  finally {
+    seedLoading.value = false
+  }
+}
+
+async function handleLandAction(action: 'remove' | 'plant' | 'organic_fertilize') {
+  closeContextMenu()
+  if (!selectedLandId.value)
+    return
+  if (action === 'plant') {
+    await openSeedDialog()
+    return
+  }
+  await executeSingleLandAction(action)
+}
+
+async function confirmSeedPlant() {
+  if (!canSubmitSeedPlant.value || !selectedSeedId.value)
+    return
+  await executeSingleLandAction('plant', selectedSeedId.value)
+  closeSeedDialog()
+}
 
 async function executeOperate() {
   if (!currentAccountId.value || !confirmConfig.value.opType)
@@ -224,11 +345,17 @@ onMounted(() => {
   refresh()
   resume()
   resumeRefresh()
+  window.addEventListener('click', closeContextMenu)
+  window.addEventListener('scroll', closeContextMenu, true)
+  window.addEventListener('keydown', handleWindowKeydown)
 })
 
 onUnmounted(() => {
   pause()
   pauseRefresh()
+  window.removeEventListener('click', closeContextMenu)
+  window.removeEventListener('scroll', closeContextMenu, true)
+  window.removeEventListener('keydown', handleWindowKeydown)
 })
 </script>
 
@@ -300,6 +427,7 @@ onUnmounted(() => {
             v-for="land in displayLands"
             :key="land.id"
             :class="getLandWrapperClass(land)"
+            @contextmenu.prevent="openLandContextMenu($event, land)"
           >
             <LandCard :land="land" />
           </div>
@@ -314,5 +442,110 @@ onUnmounted(() => {
       @confirm="executeOperate"
       @cancel="confirmVisible = false"
     />
+
+    <div
+      v-if="contextMenuVisible"
+      class="fixed z-[70] min-w-35 rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-800"
+      :style="contextMenuStyle"
+      @click.stop
+    >
+      <button
+        class="w-full rounded px-3 py-2 text-left text-sm transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-gray-700"
+        :disabled="singleOperating"
+        @click="handleLandAction('remove')"
+      >
+        铲除
+      </button>
+      <button
+        class="w-full rounded px-3 py-2 text-left text-sm transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-gray-700"
+        :disabled="singleOperating"
+        @click="handleLandAction('plant')"
+      >
+        种植
+      </button>
+      <button
+        class="w-full rounded px-3 py-2 text-left text-sm transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-gray-700"
+        :disabled="singleOperating"
+        @click="handleLandAction('organic_fertilize')"
+      >
+        施有机肥
+      </button>
+    </div>
+
+    <div
+      v-if="seedDialogVisible"
+      class="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      @click="closeSeedDialog"
+    >
+      <div class="max-h-[80vh] w-full max-w-xl overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-gray-800" @click.stop>
+        <div class="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-gray-700">
+          <h3 class="text-lg font-bold">
+            选择种子（地块 #{{ selectedLandId }}）
+          </h3>
+          <button class="text-gray-400 transition hover:text-gray-600 dark:hover:text-gray-300" @click="closeSeedDialog">
+            <div class="i-carbon-close text-lg" />
+          </button>
+        </div>
+        <div class="max-h-[55vh] overflow-y-auto p-4">
+          <div v-if="seedLoading" class="flex justify-center py-12">
+            <div class="i-svg-spinners-90-ring-with-bg text-4xl text-blue-500" />
+          </div>
+          <div v-else-if="!seeds.length" class="rounded-lg bg-gray-50 px-4 py-6 text-center text-sm text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
+            背包暂无种子
+          </div>
+          <div v-else class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <button
+              v-for="seed in seeds"
+              :key="seed.seedId"
+              class="flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition"
+              :class="[
+                Number(seed.plantSize || 1) > 1 || Number(seed.count || 0) <= 0
+                  ? 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400 dark:border-gray-700 dark:bg-gray-700/60 dark:text-gray-500'
+                  : Number(selectedSeedId) === Number(seed.seedId)
+                    ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/30'
+                    : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/60 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-blue-500 dark:hover:bg-blue-900/20',
+              ]"
+              :disabled="Number(seed.plantSize || 1) > 1 || Number(seed.count || 0) <= 0 || singleOperating"
+              @click="selectedSeedId = Number(seed.seedId)"
+            >
+              <img
+                v-if="seed.image"
+                :src="getSafeImageUrl(seed.image)"
+                :alt="seed.name"
+                class="h-10 w-10 object-contain"
+              >
+              <div v-else class="h-10 w-10 rounded bg-gray-200 dark:bg-gray-700" />
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-sm font-medium">
+                  {{ seed.name }}
+                </div>
+                <div class="text-xs text-gray-500 dark:text-gray-400">
+                  数量: {{ seed.count }} | {{ seed.requiredLevel }}级 | {{ seed.plantSize }}x{{ seed.plantSize }}
+                </div>
+                <div v-if="Number(seed.plantSize || 1) > 1" class="text-xs text-red-500 dark:text-red-400">
+                  仅支持 1x1 种子
+                </div>
+              </div>
+            </button>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 border-t border-gray-100 px-4 py-3 dark:border-gray-700">
+          <button
+            class="rounded-lg px-4 py-2 text-sm text-gray-600 transition hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+            :disabled="singleOperating"
+            @click="closeSeedDialog"
+          >
+            取消
+          </button>
+          <button
+            class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="singleOperating || !canSubmitSeedPlant"
+            @click="confirmSeedPlant"
+          >
+            确认种植
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
